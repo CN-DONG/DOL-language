@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DOLang</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#2c3036;color:#e2e2e2;font-family:monospace;padding:15px}
+  #output{background:#1f2226;padding:10px;height:320px;overflow:auto;margin-bottom:10px;border:1px solid #444a52}
+  #codeInput{width:100%;height:220px;background:#26292e;color:#d0d8e2;padding:8px;border:1px solid #444a52;margin-bottom:8px;outline:none;resize:none}
+  #inputBox{width:100%;height:70px;background:#26292e;color:#9fc0e5;padding:8px;border:1px solid #444a52;margin-bottom:10px;outline:none;resize:none}
+  #drawCanvas{background:#fff;border:2px solid #444a52;margin:10px auto;display:block;cursor:crosshair;width:600px;height:300px}
+  #imgPreview{border:1px dashed #444a52;background:#26292e;padding:10px;min-height:180px;margin:10px 0;text-align:center}
+  #light{width:70px;height:70px;background:#0066ff;border-radius:50%;margin:15px auto;transition:0.5s ease;box-shadow:0 0 40px #0066ff;border:2px solid #555}
+  button{padding:8px 18px;background:#5a7ca3;color:#fff;border:none;margin-right:8px;cursor:pointer}
+  button:hover{background:#688bb6}
+  .re-run-btn{background:#2ecc71}
+  .re-run-btn:hover{background:#27ae60}
+  .file-btn{background:#ffaa00;color:#000;font-weight:bold}
+  .file-btn:hover{background:#ffbb33}
+  .line{margin:3px 0}
+  .cmd{color:#d0d8e2}
+  .input{color:#9fc0e5}
+  .out{color:#a8b9a8}
+  .err{color:#ff6666}
+  .help{color:#9fc0e5}
+  .hidden{display:none}
+  .forbid{color:#ff4444;font-weight:bold}
+  .run{color:#44ff44;font-weight:bold}
+  .stage{color:#f90;font-weight:bold}
+  .egg{color:#ff69b4;font-weight:bold;text-shadow:0 0 5px #ff69b4}
+  .time{color:#00ffff;font-weight:bold}
+  .eg{color:#fdfd96;font-weight:bold;text-shadow:0 0 8px #fdfd96;letter-spacing:2px}
+  .dongper{color:#00ff99;font-weight:bold;text-shadow:0 0 8px #00ff99}
+</style>
+</head>
+<body>
+<div id="output"></div>
+<div id="light"></div>
+<canvas id="drawCanvas"></canvas>
+<!-- 提示文字：输入/h@m? 查看帮助 -->
+<textarea id="codeInput" placeholder="输入/h@m? 查看帮助"></textarea>
+<textarea id="inputBox" placeholder="输入对AI说的话"></textarea>
+<div id="imgPreview">Image Preview</div>
+<button onclick="run()">RUN</button>
+<button class="re-run-btn" onclick="reRun()">RESET</button>
+<button onclick="clr()">CLEAR</button>
+<button onclick="resetAll()">INIT</button>
+<button class="file-btn" onclick="newFile()">SAVE</button>
+<button class="file-btn" onclick="openFile()">LOAD</button>
+
+<input type="file" id="fImg" class="hidden" accept="image/*">
+<input type="file" id="fTxt" class="hidden" accept="text/*">
+<input type="file" id="fAudio" class="hidden" accept="audio/*">
+<script>
+const o = document.getElementById('output');
+const c = document.getElementById('codeInput');
+const i = document.getElementById('inputBox');
+const img = document.getElementById('imgPreview');
+const fImg = document.getElementById('fImg');
+const fTxt = document.getElementById('fTxt');
+const fAudio = document.getElementById('fAudio');
+const light = document.getElementById('light');
+const canvas = document.getElementById('drawCanvas');
+const ctx = canvas.getContext('2d');
+let lines = [], p = 0, wait = false;
+let vars = {}, arrs = {}, lastVal = 0;
+let audioPlayer = new Audio();
+let loopQueue = [];
+let isDrawing = false;
+let brushColor = '#000';
+let brushSize = 2;
+let isRun1End = false;
+
+// 核心新增：监听输入框回车，输入run自动运行
+c.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    const val = c.value.trim();
+    if (val === 'run') {
+      e.preventDefault(); // 阻止回车换行
+      autoRun(); // 执行自动运行
+    }
+  }
+});
+
+// 自动运行方法
+function autoRun() {
+  clr();
+  lines = c.value.split('\n').filter(line => line.trim() !== 'run'); // 过滤掉run字符
+  p = 0;
+  loopQueue = [];
+  isRun1End = false;
+  step(); // 开始执行代码
+  log('✅ 输入run，自动执行成功！', 'out');
+}
+
+function log(t, cls) {
+  let d = document.createElement('div');
+  d.className = 'line ' + cls;
+  d.textContent = t;
+  o.appendChild(d);
+  o.scrollTop = o.scrollHeight;
+}
+function clr() { 
+  o.innerHTML = ''; 
+  light.style.background = '#0066ff';
+  light.style.boxShadow = '0 0 40px #0066ff';
+}
+function resetAll() {
+  clr(); c.value=''; i.value=''; img.innerHTML='Image Preview';
+  lines=[]; p=0; wait=false; loopQueue = [];
+  vars={}; arrs={}; lastVal=0;
+  audioPlayer.pause(); audioPlayer.src='';
+  isDrawing = false;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  isRun1End = false;
+}
+function n() { 
+  if(loopQueue.length > 0) {
+    execLoop();
+    return;
+  }
+  p++; step(); 
+}
+function calc(expr) {
+  try {
+    let s = expr;
+    for(let k in vars) s = s.replaceAll(k, vars[k]);
+    for(let k in arrs) {
+      for(let idx in arrs[k]) {
+        s = s.replaceAll(`${k}[${idx}]`, arrs[k][idx]);
+      }
+    }
+    return Function('"use strict";return (' + s + ')')();
+  } catch(e) {
+    return null;
+  }
+}
+
+function showHelp() {
+  let help = [
+    '=== DOLang 帮助列表 ===',
+    '/rn/g!@m      = 启动系统',
+    '/h@m?         = 查看本帮助',
+    'run           = 输入后回车，自动执行代码（无需点按钮）',
+    'run1-end      = 第一段执行结束（暂停）',
+    'run2-end      = 第二段执行结束（终止）',
+    '/egg/dongper  = 🌈Dongper彩蛋对话',
+    '/eg/🌠🌌🌫    = 🌌触发特效展示',
+    '/ig/time      = ⏰查询当前时间',
+    '/ig/draw#畫畫 = ✏️ 开启画画功能',
+    '/ig/truf-bitch= 🚫 违禁词管理',
+    '/ig/cin-cnm   = 💹 润计提功能',
+    'dr-gt20.20    = 🖌️ 设置画笔大小',
+    'dr-sp [<circle>= ⚪ 设置圆形画笔',
+    'loopN{cmd}    = 🔁 循环执行指令N次',
+    '/tc/(done)    = 🛑 退出程序',
+    '========================'
+  ];
+  let idx = 0;
+  let t = setInterval(()=>{
+    if(idx < help.length) {
+      log(help[idx], 'help');
+      idx++;
+    } else {
+      clearInterval(t);
+      n();
+    }
+  }, 100);
+}
+
+function newFile() {
+  let blob = new Blob([c.value], {type: 'text/plain'});
+  let url = URL.createObjectURL(blob);
+  let a = document.createElement('a');
+  a.href = url;
+  a.download = 'dolang_code.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+  log('✅ 代码已保存为dolang_code.txt', 'out');
+}
+
+function openFile() {
+  fTxt.click();
+  fTxt.onchange = function(e) {
+    let reader = new FileReader();
+    reader.onload = function(evt) {
+      c.value = evt.target.result;
+      log('✅ 代码已从文件加载', 'out');
+    };
+    reader.readAsText(e.target.files[0]);
+  };
+}
+
+function execLight(color) {
+  switch(color.toLowerCase()) {
+    case 'red':light.style.background='#ff0000';light.style.boxShadow='0 0 40px #ff0000';break;
+    case 'green':light.style.background='#00ff44';light.style.boxShadow='0 0 40px #00ff44';break;
+    case 'yellow':light.style.background='#ffff00';light.style.boxShadow='0 0 40px #ffff00';break;
+    default:light.style.background='#0066ff';light.style.boxShadow='0 0 40px #0066ff';
+  }
+  log('Light Set: ' + color, 'out');
+}
+
+function execLoop() {
+  let task = loopQueue[0];
+  log(`> Loop ${task.cur}/${task.total}: ${task.cmd}`, 'cmd');
+  if(task.cmd.startsWith('/ig/line ')) execLight(task.cmd.split(' ')[1]);
+  else if(task.cmd.startsWith('pr*/') && task.cmd.endsWith('=')) log(task.cmd.slice(4, -1).trim(), 'out');
+  else if(task.cmd === '/ig/draw#畫畫') execDraw();
+  else if(task.cmd === '/egg/dongper') execEggDongper();
+  else if(task.cmd === '/ig/time') execIgTime();
+  else if(task.cmd === '/eg/🌠🌌🌫') execEgEffect();
+  task.cur++;
+  if(task.cur > task.total) {
+    loopQueue.shift();
+    log(`Loop Done: ${task.total} times`, 'out');
+  }
+  setTimeout(n, 300);
+}
+
+function parseLoop(line) {
+  let match = line.match(/^loop(\d+)\{([^}]+)\}$/);
+  if(!match) return false;
+  let times = parseInt(match[1]), cmdStr = match[2].trim();
+  if(isNaN(times) || times < 1 || !cmdStr) {
+    log('Loop Err: Use loopN{cmd} (N≥1)', 'err');
+    return false;
+  }
+  loopQueue.push({total: times, cur: 1, cmd: cmdStr});
+  log(`Loop Init: ${times} times → ${cmdStr}`, 'out');
+  return true;
+}
+
+function execDraw() {
+  isDrawing = !isDrawing;
+  if(isDrawing) {
+    log('✅ 画画功能已开启 - 画布拖拽绘画', 'out');
+    ctx.strokeStyle = brushColor;ctx.lineWidth = brushSize;ctx.lineCap = 'round';
+  } else {
+    log('❌ 画画功能已关闭', 'out');
+  }
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  if(!isDrawing) return;
+  ctx.beginPath();
+  const pos = getCanvasPos(e);
+  ctx.moveTo(pos.x, pos.y);
+});
+canvas.addEventListener('mousemove', (e) => {
+  if(!isDrawing) return;
+  const pos = getCanvasPos(e);
+  ctx.lineTo(pos.x, pos.y);
+  ctx.stroke();
+});
+canvas.addEventListener('mouseup', () => {if(isDrawing) ctx.closePath();});
+canvas.addEventListener('mouseleave', () => {if(isDrawing) ctx.closePath();});
+
+function getCanvasPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {x: e.clientX - rect.left, y: e.clientY - rect.top};
+}
+
+function setBrushSize(cmd) {
+  brushSize = parseFloat(cmd.replace('dr-gt', '')) || 2;
+  ctx.lineWidth = brushSize;
+  log(`🖌️ 画笔大小设为：${brushSize}px`, 'out');
+}
+
+function setBrushShape(cmd) {
+  if(cmd.includes('circle')) {
+    ctx.lineCap = 'round';ctx.lineJoin = 'round';
+    log(`🟢 画笔形状设为：圆形`, 'out');
+  }
+}
+
+function forbidWordManage(cmd) {
+  log(`🚫 违禁词管理已启动`, 'forbid');
+  if(cmd.includes('bitch.[<nigger>]')) log(`🚫 检测到违禁词，已拦截`, 'forbid');
+}
+
+function runCalc(cmd) {
+  log(`💹 润计提功能已启动`, 'run');
+  if(cmd.includes('cincnm,bi.ni')) log(`💹 润计提日志已隐藏`, 'run');
+}
+
+function execEggDongper() {
+  log('===================== 🌈egg🌈🌠🌌2.0 =====================', 'egg');
+  log('孩子啊那改一下:▂▃▄▅▆▇█丿勹阝匚屮巛彳彡廾彐囗尢夂虍疋', 'egg');
+  log('(dongper:say% &talk%) | (dongper:compseggs)', 'egg');
+  log('=========================================================', 'egg');
+  let originalColor = light.style.backgroundColor;
+  light.style.background = '#ff69b4';
+  light.style.boxShadow = '0 0 20px #ff69b4';
+  setTimeout(() => {
+    light.style.background = originalColor;
+    light.style.boxShadow = originalColor === '#0066ff' ? '0 0 40px #0066ff' : `0 0 40px ${originalColor}`;
+  }, 1000);
+}
+
+function execIgTime() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hour = String(now.getHours()).padStart(2, '0');
+  const minute = String(now.getMinutes()).padStart(2, '0');
+  const second = String(now.getSeconds()).padStart(2, '0');
+  const timeStr = `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+  log(`⏰ 当前系统时间：${timeStr}`, 'time');
+}
+
+function execEgEffect() {
+  log('===================== 🌠🌌🌫 特效展示 =====================', 'eg');
+  log('🌠🌌🌫🎆🎇🏞🌁🌃🏙🌄🌅🌆🌇🌉🛣🛤', 'eg');
+  log('🔲Dongper', 'dongper');
+  log('=========================================================', 'eg');
+  let originalColor = light.style.backgroundColor;
+  let colors = ['#fdfd96', '#00ff99', '#9370db', '#00ffff'];
+  let i = 0;
+  let flash = setInterval(() => {
+    light.style.background = colors[i];
+    light.style.boxShadow = `0 0 30px ${colors[i]}`;
+    i = (i + 1) % colors.length;
+  }, 200);
+  setTimeout(() => {
+    clearInterval(flash);
+    light.style.background = originalColor;
+    light.style.boxShadow = originalColor === '#0066ff' ? '0 0 40px #0066ff' : `0 0 40px ${originalColor}`;
+  }, 3000);
+}
+
+function step() {
+  if(p >= lines.length) {
+    log('=== Program End ===', 'out');
+    return;
+  }
+  let l = lines[p].trim();
+  if(!l) { n(); return; }
+  if(parseLoop(l)) { n(); return; }
+  log('> ' + l, 'cmd');
+
+  if(l === 'run1-end') {
+    log('=== ⏸️ RUN1段执行结束，点击RUN继续执行RUN2段 ===', 'stage');
+    isRun1End = true;
+    return;
+  }
+  if(l === 'run2-end') {
+    log('=== 🚀 RUN2段执行结束，程序完全终止 ===', 'stage');
+    p = lines.length;
+    return;
+  }
+
+  if(l === '/eg/🌠🌌🌫') { execEgEffect(); n(); return; }
+  if(l === '/egg/dongper') { execEggDongper(); n(); return; }
+  if(l === '/ig/time') { execIgTime(); n(); return; }
+  if(l === '/ig/draw#畫畫') { execDraw(); n(); return; }
+  if(l.startsWith('dr-gt')) { setBrushSize(l); n(); return; }
+  if(l.startsWith('dr-sp [<circle>')) { setBrushShape(l); n(); return; }
+  if(l.startsWith('/ig/truf-bitch') || l === 'bitch.[<nigger>]') { forbidWordManage(l); n(); return; }
+  if(l.startsWith('/ig/cin-cnm') || l.includes('cincnm,bi.ni')) { runCalc(l); n(); return; }
+
+  if(l.startsWith('AI*')) {
+    let txt = l.slice(3);
+    log('-：(='+txt+') <AI>', 'out');
+    n(); return;
+  }
+  if(l === 'web 百度') {
+    log('打开百度', 'out');
+    window.open('https://www.baidu.com', '_blank');
+    n(); return;
+  }
+  if(l === '/rn/g!@m' || l === 'r@m') {
+    log('System Started', 'out');
+    n(); return;
+  }
+  if(l === '/h@m?') {
+    showHelp();
+    return;
+  }
+  if(l === '/iw/Dongper(os)') {
+    log('Opening GitHub...', 'out');
+    window.open('https://github.com/CN-DONG/CN-DONG', '_blank');
+    n(); return;
+  }
+  if(l === "i'1-13(os nik)") {
+    log('OS Nik Ready', 'out');
+    n(); return;
+  }
+  if(l === '<end & run os>') {
+    log('=== OS Auto Run Success ===', 'out');
+    n(); return;
+  }
+  if(l === '/tc/(done)') {
+    log('Program Stopped', 'out');
+    return;
+  }
+  if(l.startsWith('/ig/<') && l.endsWith('>')) {
+    let name = l.slice(4, -1);
+    log('Module loaded: ' + name, 'out');
+    n(); return;
+  }
+  if(l.startsWith('/ig/line ')) {
+    execLight(l.split(' ')[1]);
+    n(); return;
+  }
+  if(l.startsWith('os_n?(') && l.endsWith(')')) {
+    let name = l.slice(5, -1);
+    log('System Name: ' + name, 'out');
+    n(); return;
+  }
+  if(l.startsWith('os_c?(') && l.endsWith(')')) {
+    let t = l.slice(5, -1);
+    log('System Type: ' + t, 'out');
+    n(); return;
+  }
+  if(l.startsWith('pr*/') && l.endsWith('=')) {
+    let txt = l.slice(4, -1).trim();
+    log(txt, 'out');
+    n(); return;
+  }
+  if(l.startsWith('i*p/')) {
+    let tip = l.slice(4);
+    log('Input: ' + tip, 'input');
+    wait = true;
+    n(); return;
+  }
+  if(l.startsWith('dc_(') && l.endsWith(')')) {
+    let msg = l.slice(4, -1);
+    log('Confirm: ' + msg, 'input');
+    wait = true;
+    n(); return;
+  }
+  if(l === '/j*open-ph*') {
+    log('Select image', 'out');
+    fImg.click();
+    fImg.onchange = e=>{
+      if(!e.target.files[0]) return;
+      let r = new FileReader();
+      r.onload = ev=>{
+        img.innerHTML = `<img src="${ev.target.result}" style="max-width:100%;max-height:180px">`;
+      };
+      r.readAsDataURL(e.target.files[0]);
+    };
+    n(); return;
+  }
+  if(l === 'j*open-wf*') {
+    log('Select text', 'out');
+    fTxt.click();
+    fTxt.onchange = e=>{
+      if(!e.target.files[0]) return;
+      let r = new FileReader();
+      r.onload = ev=>{ i.value = ev.target.result; };
+      r.readAsText(e.target.files[0]);
+    };
+    n(); return;
+  }
+  if(l === 'SPR#') {
+    log('Select audio', 'out');
+    fAudio.onchange = e=>{
+      if(!e.target.files[0]) return;
+      audioPlayer.src = URL.createObjectURL(e.target.files[0]);
+      audioPlayer.play().then(()=>log('Audio playing','out')).catch(()=>log('Audio err','err'));
+    };
+    fAudio.click();
+    n(); return;
+  }
+  if(/^[A-Za-z]+\=/.test(l) && !/\[.*\]/.test(l)) {
+    let [name, val] = l.split('=');
+    let res = calc(val);
+    if(res != null) {
+      vars[name] = res; lastVal = res;
+      log(name+'='+res, 'out');
+    } else log('Var Err', 'err');
+    n(); return;
+  }
+  if(/^[A-Za-z]+\[.*\]\=/.test(l)) {
+    let [left, val] = l.split('=');
+    let an = left.match(/^([A-Za-z]+)\[/)?.[1];
+    let idx = left.match(/\[(\d+)\]/)?.[1];
+    if(an && idx != null) {
+      let res = calc(val);
+      if(res != null) {
+        if(!arrs[an]) arrs[an] = {};
+        arrs[an][idx] = res; lastVal = res;
+        log(left+'='+res, 'out');
+      } else log('Arr Err', 'err');
+    } else log('Arr Err', 'err');
+    n(); return;
+  }
+  if(/[0-9A-Za-z\+\-\*\/\(\)]/.test(l) && !l.includes('=')) {
+    let res = calc(l);
+    if(res != null) { lastVal = res; log(res+'', 'out'); }
+    else log('Calc Err', 'err');
+    n(); return;
+  }
+  if(l === 'auto') { log('last='+lastVal, 'out'); n(); return; }
+  log('OK', 'out');
+  n();
+}
+
+// 原有RUN按钮功能保留（备用）
+function run() {
+  let u = i.value.trim();
+  if(u) {
+    log('[You] '+u, 'input');
+    log('-：(='+u+') <AI>', 'out');
+    i.value = '';
+    return;
+  }
+  if(wait) { wait = false; n(); return; }
+  if(isRun1End) {
+    log('=== ▶️  继续执行RUN2段 ===', 'stage');
+    isRun1End = false;
+    n();
+    return;
+  }
+  if(p === 0) { 
+    clr(); 
+    lines = c.value.split('\n'); 
+    loopQueue = [];
+  }
+  step();
+}
+
+function reRun() {
+  p = 0;
+  loopQueue = [];
+  isRun1End = false;
+  clr();
+  lines = c.value.split('\n');
+  step();
+}
+</script>
+</body>
+</html>
