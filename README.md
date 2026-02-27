@@ -36,11 +36,11 @@ Hope:big
 From : 中華人民共和國 北京
 Use The AI(part)
 AI:Doubao,CHATGPT,QWEN
-##Dongper
+## Dongper
 Email:ting_dytemail@sohu.com
 @me?please tell me your name thanks
 age13
-##from HONOR 20 PRO (Harmony OS 4.0)
+## fromfrom HONOR 20 PRO (Harmony OS 4.0)
 Harmony 4.0 in HONOR 20 PRO(HUAWEI/Old HONOR)
 ##color
 🟥️🟧️🟨️🟩️🟦️🟪️🟫️⬛⬜▁▂▃▄▅▆▇█
