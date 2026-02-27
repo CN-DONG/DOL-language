@@ -40,9 +40,10 @@ AI:Doubao,CHATGPT,QWEN
 Email:ting_dytemail@sohu.com
 @me?please tell me your name thanks
 age13
-## fromfrom HONOR 20 PRO (Harmony OS 4.0)
+## from
+from HONOR 20 PRO (Harmony OS 4.0)
 Harmony 4.0 in HONOR 20 PRO(HUAWEI/Old HONOR)
-##color
+## 
 🟥️🟧️🟨️🟩️🟦️🟪️🟫️⬛⬜▁▂▃▄▅▆▇█
 ## Example 
  ```dol
